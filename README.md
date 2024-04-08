@@ -1,4 +1,4 @@
-# sockets
+# Peer-to-Peer Chat System // Jilin Zheng // U49258796 
 
 ## References
 
