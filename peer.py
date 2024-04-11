@@ -7,8 +7,6 @@ import socket
 import select
 import threading
 
-from flask import session
-
 
 class Peer:
     """ Peer class, capabale of both client and server functionality """
@@ -38,6 +36,9 @@ class Peer:
         self.conn_port = None
         self.conn_socket = None
         self.session_active = False
+        # for multi-client capabilities
+        #self.socket_list = []
+        #self.clients = {}
     
     def init_server(self, serv_ip, serv_port):
         """
@@ -53,6 +54,7 @@ class Peer:
         self.serv_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.serv_socket.bind((self.serv_ip, self.serv_port))
         self.serv_socket.listen()
+        self.socket_list.append(self.serv_socket)
 
     def init_client(self, conn_ip, conn_port):
         """
@@ -75,25 +77,34 @@ class Peer:
         params:
         :msg: desired message to be sent
         """
+        print(f"MESSAGE TO BE SENT: {msg}")
         msg = msg.encode("utf-8")
         msg_header = f"{len(msg):<{self.header_len}}".encode("utf-8")
-
+        self.conn_socket.send(msg_header+msg)
 
     def recv_msg(self):
         """
         Handles messages sent to the initiated server
         """
+        conn, addr = self.serv_socket.accept()
+        print(f"NEW CONNECTION ACCEPTED FROM {addr[0]}:{addr[1]}, with username")
+
         while self.session_active:
-            conn, addr = self.serv_socket.accept()
-            print(f"NEW CONNECTION ACCEPTED FROM {addr}")
+            #read_sockets, _, _, = select.select(self.socket_list)
+            
 
     def start_session(self):
         """
         Begins a session via the initiated client, with threaded subroutines
         """
         self.session_active = True
-        recv_thread = threading.Thread(target=self.recv_msg) 
+        recv_thread = threading.Thread(target=self.recv_msg, args=[self]) 
         recv_thread.start()
+
+        # send the username over to the client
+        username = self.username.encode("utf-8")
+        username_header = f"{len("UNAME"+self.username):<{self.header_len}}".encode("utf-8")
+        self.conn_socket.send(username_header+username)
 
         while self.session_active:
             msg = input(f"{self.username} > ")
@@ -101,5 +112,9 @@ class Peer:
                 self.session_active = False
                 break
 
-            send_thread = threading.Thread(target=self.send_msg)
+            send_thread = threading.Thread(target=self.send_msg, args=[self, msg])
             send_thread.start()
+            send_thread.join() # block until the current message has finished sending
+
+        recv_thread.join()
+        print("SUCCESSFULLY EXITED SESSION")
