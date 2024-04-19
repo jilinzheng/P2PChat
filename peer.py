@@ -15,14 +15,12 @@ class Peer:
     CENTRAL_SERVER_IP = "127.0.0.1"
     CENTRAL_SERVER_PORT = "12345"
 
-    def __init__(self,
-                 header_len=10,
-                 username="new_user"):
+    def __init__(self, header_len, username):
 
         """
         Initialize header length and usernmae for messages and connections, respectively,
         as well as other to-be-initialized attributes
-        
+
         params:
         :header_len: length of the header in bytes; a value representing how many bytes to read/send from the server/client
         :username: the username for the client socket opened (conn_socket)
@@ -31,15 +29,11 @@ class Peer:
         self.username = username
         self.serv_ip = None
         self.serv_port = None
-        self.serv_socket = None
+        self.serv_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.conn_ip = None
         self.conn_port = None
-        self.conn_socket = None
-        self.session_active = False
-        # for multi-client capabilities
-        #self.socket_list = []
-        #self.clients = {}
-    
+        self.conn_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
     def init_server(self, serv_ip, serv_port):
         """
         Initialize a server with an ip and port that accepts other peer connections
@@ -50,30 +44,29 @@ class Peer:
         """
         self.serv_ip = serv_ip
         self.serv_port = serv_port
-        self.serv_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.serv_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.serv_socket.bind((self.serv_ip, self.serv_port))
         self.serv_socket.listen()
-        self.socket_list.append(self.serv_socket)
+        print("Server successfully initialized!")
 
     def init_client(self, conn_ip, conn_port):
         """
         Initialize a client that connects to another peer
-        
+
         params:
         :conn_ip: ip of client that connection is desired with
         :conn_port: port of client that connection is desired with
         """
         self.conn_ip = conn_ip
         self.conn_port = conn_port
-        self.conn_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.conn_socket.connect((self.conn_ip, self.conn_port))
         self.conn_socket.setblocking(False)
+        print("Client successfully initialized!")
 
     def send_msg(self, msg):
         """
         Sends a message via a previously initialized client to its connection
-        
+
         params:
         :msg: desired message to be sent
         """
@@ -90,15 +83,18 @@ class Peer:
         print(f"NEW CONNECTION ACCEPTED FROM {addr[0]}:{addr[1]}, with username")
 
         while self.session_active:
-            #read_sockets, _, _, = select.select(self.socket_list)
-            
+            msg_header = conn.recv(self.header_len)
+            msg_len = int(msg_header.decode("utf-8").strip())
+            msg = (conn.recv(msg_len)).decode("utf-8")
+            if msg[0:5] == "UNAME":
+                print(f"USERNAME RECEIVED: {msg[5:]}")
 
     def start_session(self):
         """
         Begins a session via the initiated client, with threaded subroutines
         """
         self.session_active = True
-        recv_thread = threading.Thread(target=self.recv_msg, args=[self]) 
+        recv_thread = threading.Thread(target=self.recv_msg)
         recv_thread.start()
 
         # send the username over to the client
@@ -112,8 +108,7 @@ class Peer:
                 self.session_active = False
                 break
 
-            send_thread = threading.Thread(target=self.send_msg, args=[self, msg])
-            send_thread.start()
+            send_thread = threading.Thread(target=self.send_msg, args=[msg]).start()
             send_thread.join() # block until the current message has finished sending
 
         recv_thread.join()
