@@ -13,7 +13,7 @@ class Peer:
 
     # ip and port of central server for user discovery
     CENTRAL_SERVER_IP = "127.0.0.1"
-    CENTRAL_SERVER_PORT = "12345"
+    CENTRAL_SERVER_PORT = 50000
 
     def __init__(self, header_len, username):
 
@@ -66,6 +66,20 @@ class Peer:
         self.conn_socket.setblocking(True)
         print("Client successfully initialized!")
 
+    def init_db(self):
+        self.db = sqlite3.connect(f"{self.username}.db", check_same_thread=False)
+        self.cursor = self.db.cursor()
+
+        table = """
+            CREATE TABLE IF NOT EXISTS recv_msgs (
+            user VARCHAR(255) NOT NULL,
+            msg TEXT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        self.cursor.execute(table)
+        print("SQLITE DATABASE+TABLE SUCCESSFULLY CREATED/CONNECTED")
+
     def send_msg(self, msg):
         """
         Sends a message via a previously initialized client to its connection
@@ -96,14 +110,28 @@ class Peer:
             print(f"USERNAME RECEIVED: {msg[8:]}", flush=True)
             self.lock.release()
             conn_username = msg[8:]
+            # input sanitization
+            conn_username = conn_username.replace('"', "")
+            conn_username = conn_username.replace("'", "")
+            conn_username = conn_username.replace(";", "")
 
         while self.session_active:
             msg_header = conn.recv(self.header_len)
-            if msg_header == '':
-                print("YOUR CONNECTED USER HAS DISCONNECTED")
+            if not msg_header:
+                break
             msg_len = int(msg_header.decode("utf-8").strip())
             msg = (conn.recv(msg_len)).decode("utf-8")
             print(conn_username + " > " + msg, flush=True)
+            # input sanitization
+            msg = msg.replace('"', "")
+            msg = msg.replace("'", "")
+            msg = msg.replace(";", "")
+            table_entry = f"""
+                INSERT INTO recv_msgs (user, msg)
+                VALUES (\"{conn_username}\", \"{msg}\");
+                """
+            self.cursor.execute(table_entry)
+            self.db.commit()
 
     def start_session(self):
         """
@@ -132,10 +160,11 @@ class Peer:
         recv_thread.join(timeout=5)
         self.conn_socket.close()
         print("SUCCESSFULLY EXITED SESSION")
-    
-    def init_db(self):
-        self.db = sqlite3.connect(f"{self.username}.db")
-        self.cursor = self.db.cursor()
+
+    def show_saved_msgs(self):
+        entries = self.cursor.execute("""SELECT * FROM recv_msgs""")
+        for row in entries:
+            print(row)
 
 
 if __name__ == "__main__":
@@ -144,12 +173,20 @@ if __name__ == "__main__":
     serv_port = int(input("Enter your server port, i.e. what port others will connect to you with: "))
     peer.init_server(serv_ip="127.0.0.1", serv_port=serv_port) # serve on localhost
     print(f"Your peer server has been initialized! Clients can connect to you with '127.0.0.1:{serv_port}'!")
+    peer.init_db()
 
     while True:
-        choice = input("Would you like to connect to the Central Server to perform user discovery, or would you like do connect to another user? Enter '0' for Central Server, or '1' for another user. You can also quit with ':q!'. Enter your choice: ")
+        choice = input("""What would you like to do?
+Enter '0' to connect to the Central Server.
+Enter '1' to connect to another user.
+Enter 'SSM' to Show Saved Messages.
+Enter ':q!' to quit.
+Enter your choice: """)
         # connect to central server
         if choice == "0":
-            pass
+            peer.init_client(peer.CENTRAL_SERVER_IP, peer.CENTRAL_SERVER_PORT)
+            print("Remember, to start typing, first input an 'i' to enable sending messages!") #inspired by vim
+            peer.start_session()
         # connect to another user
         elif choice == "1":
             conn_ip = input("Enter the IP of the user you want to connect to: ")
@@ -157,6 +194,10 @@ if __name__ == "__main__":
             peer.init_client(conn_ip=conn_ip, conn_port=conn_port)
             print("Remember, to start typing, first input an 'i' to enable sending messages!") #inspired by vim
             peer.start_session()
+        # display all saved messages from the user database
+        elif choice == "SSM":
+            peer.show_saved_msgs()
+        # quit the program
         elif choice == ":q!":
             print("Thank for being a peer!")
             break
