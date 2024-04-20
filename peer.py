@@ -4,8 +4,8 @@ Peer class, capable of both client and server functionality, enabling P2P networ
 
 
 import socket
-import select
 import threading
+import sqlite3
 
 
 class Peer:
@@ -34,6 +34,8 @@ class Peer:
         self.conn_port = None
         self.conn_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.lock = threading.Lock() # for locking prints to stdout
+        self.db = None
+        self.cursor = None
 
     def init_server(self, serv_ip, serv_port):
         """
@@ -61,7 +63,7 @@ class Peer:
         self.conn_ip = conn_ip
         self.conn_port = conn_port
         self.conn_socket.connect((self.conn_ip, self.conn_port))
-        self.conn_socket.setblocking(False)
+        self.conn_socket.setblocking(True)
         print("Client successfully initialized!")
 
     def send_msg(self, msg):
@@ -79,47 +81,84 @@ class Peer:
         """
         Handles messages sent to the initiated server
         """
+        self.lock.acquire()
         conn, addr = self.serv_socket.accept()
-        print(f"NEW CONNECTION ACCEPTED FROM {addr[0]}:{addr[1]}")
+        print(f"NEW CONNECTION ACCEPTED FROM {addr[0]}:{addr[1]}", flush=True)
+        self.lock.release()
 
-        username_received = False
+        # first received message should always be username
+        msg_header = conn.recv(self.header_len)
+        msg_len = int(msg_header.decode("utf-8").strip())
+        msg = (conn.recv(msg_len)).decode("utf-8")
         conn_username = ""
+        if msg[0:8] == "USERNAME":
+            self.lock.acquire()
+            print(f"USERNAME RECEIVED: {msg[8:]}", flush=True)
+            self.lock.release()
+            conn_username = msg[8:]
+
         while self.session_active:
             msg_header = conn.recv(self.header_len)
+            if msg_header == '':
+                print("YOUR CONNECTED USER HAS DISCONNECTED")
             msg_len = int(msg_header.decode("utf-8").strip())
             msg = (conn.recv(msg_len)).decode("utf-8")
-            if msg[0:9] == "USERNAME":# and username_received == False:
-                print(f"USERNAME RECEIVED: {msg[9:]}")
-                conn_username = msg[9:]
-                username_received = True
-            else:
-                print(conn_username + "> " + msg)
+            print(conn_username + " > " + msg, flush=True)
 
     def start_session(self):
         """
-        Begins a session via the initiated client, with threaded subroutines
+        Begins a session via the initiated client, with threaded send/receive subroutines
         """
         self.session_active = True
-        recv_thread = threading.Thread(target=self.recv_msg)
+        recv_thread = threading.Thread(target=self.recv_msg, daemon=True)
         recv_thread.start()
 
         # send the username over to the client
         username = ("USERNAME" + self.username).encode("utf-8")
-        print(username)
         username_header = f"{len("USERNAME"+self.username):<{self.header_len}}".encode("utf-8")
-        print(username_header)
         self.conn_socket.send(username_header+username)
-        print(f"USERNAME ({username}) SENT")
-
+        
         while self.session_active:
-            msg = input(f"{self.username} > ")
-            if msg == ':q!': # inspired by vim, exit the session
+            choice = input()
+            if choice == "i":
+                msg = input(f"{self.username} (me) > ")
+                send_thread = threading.Thread(target=self.send_msg, args=[msg])
+                send_thread.start()
+                send_thread.join() # block until the current message has finished sending
+            elif choice == ':q!': #inpsired by vim, quit the session
+                print("EXITING SESSION")
                 self.session_active = False
-                break
 
-            send_thread = threading.Thread(target=self.send_msg, args=[msg])
-            send_thread.start()
-            send_thread.join() # block until the current message has finished sending
-
-        recv_thread.join()
+        recv_thread.join(timeout=5)
+        self.conn_socket.close()
         print("SUCCESSFULLY EXITED SESSION")
+    
+    def init_db(self):
+        self.db = sqlite3.connect(f"{self.username}.db")
+        self.cursor = self.db.cursor()
+
+
+if __name__ == "__main__":
+    username = input("Enter your username: ")
+    peer = Peer(header_len=10, username=username)
+    serv_port = int(input("Enter your server port, i.e. what port others will connect to you with: "))
+    peer.init_server(serv_ip="127.0.0.1", serv_port=serv_port) # serve on localhost
+    print(f"Your peer server has been initialized! Clients can connect to you with '127.0.0.1:{serv_port}'!")
+
+    while True:
+        choice = input("Would you like to connect to the Central Server to perform user discovery, or would you like do connect to another user? Enter '0' for Central Server, or '1' for another user. You can also quit with ':q!'. Enter your choice: ")
+        # connect to central server
+        if choice == "0":
+            pass
+        # connect to another user
+        elif choice == "1":
+            conn_ip = input("Enter the IP of the user you want to connect to: ")
+            conn_port = int(input("Enter the port the user's server is serving on: "))
+            peer.init_client(conn_ip=conn_ip, conn_port=conn_port)
+            print("Remember, to start typing, first input an 'i' to enable sending messages!") #inspired by vim
+            peer.start_session()
+        elif choice == ":q!":
+            print("Thank for being a peer!")
+            break
+        else:
+            print("That wasn't a valid choice...please read carefully and try again!")
