@@ -14,23 +14,22 @@ IP = "127.0.0.1"
 PORT = 50000
 
 
-# GLOBAL VARS
-connected_sockets = []  # list of all connected sockets, including this socket
-connected_clients = {}  # dict of connected users + metadata, populated as connections are recieved
-
-
 # INITIALIZE CENTRAL SERVER SOCKET
 central_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 central_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 central_server.bind((IP, PORT))
 central_server.listen()
-connected_sockets.append(central_server)
 
+connected_sockets = []  # list of all connected sockets, including this socket
+connected_clients = {}  # dict of connected users + metadata, populated as connections are recieved
+connected_sockets.append(central_server)
 
 def receive_msg(client_socket, client_addr):
     global connected_sockets, connected_clients
    # get the msg_header and use it to receive/read appropriate amount of bytes
     msg_header = client_socket.recv(HEADER_LENGTH)
+    if not msg_header:
+        return
     msg_length = int(msg_header.decode("utf-8").strip())
     msg = (client_socket.recv(msg_length)).decode("utf-8")
     print(f"MSG RECEIVED: {msg}")
@@ -40,16 +39,24 @@ def receive_msg(client_socket, client_addr):
         username = msg[8:]
         connected_clients[client_socket] = {'username':username, 'addr':client_addr}
         print(f"Successfully connected user '{username}' at address '{client_addr}'")
-        print(connected_sockets)
-        print(connected_clients)
+
     # return the list of clients currently registered in the central server
     elif msg[0:9] == "get_users":
-        client_socket.send((json.dumps(connected_clients)).encode("utf-8"))
+        clients_list = []
+        for ii, client in enumerate(connected_clients.values()):
+            clients_list.append({client['username'], client['addr']})
+        clients_list = (json.dumps(clients_list, default=list)).encode("utf-8")
+        clients_list_header = f"{len(clients_list):<{HEADER_LENGTH}}".encode("utf-8")
+        client_socket.send(clients_list_header+clients_list)
+        print("CLIENTS LIST SENT!")
+
+    # close the client connection
     elif msg[0:10] == "close_conn":
         connected_sockets.remove(client_socket)
         del connected_clients
         client_socket.close()
-        return f"Successfully disconnected user '{username}' at address '{client_addr}'"
+        print(f"Successfully disconnected user '{username}' at address '{client_addr}'")
+
     # otherwise just reiterate avilable central-server commands
     else:
         msg = """This is a peer-to-peer network.
@@ -73,3 +80,5 @@ while True:
             if client_socket not in connected_sockets:
                 connected_sockets.append(client_socket)
             msg = receive_msg(client_socket, client_addr)
+        else: # all other client sockets
+            msg = receive_msg(s, None)

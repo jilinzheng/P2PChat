@@ -133,6 +133,16 @@ class Peer:
             self.cursor.execute(table_entry)
             self.db.commit()
 
+    def cs_recv(self):
+        while self.session_active:
+            try:
+                msg_header = self.conn_socket.recv(self.header_len)
+                msg_len = int(msg_header.decode("utf-8").strip())
+                msg = (self.conn_socket.recv(msg_len)).decode("utf-8")
+                print(msg)
+            except OSError:
+                return
+
     def start_session(self):
         """
         Begins a session via the initiated client, with threaded send/receive subroutines
@@ -140,6 +150,10 @@ class Peer:
         self.session_active = True
         recv_thread = threading.Thread(target=self.recv_msg, daemon=True)
         recv_thread.start()
+
+        if self.conn_port == 50000:
+            cs_recv_thread = threading.Thread(target=self.cs_recv, daemon=True)
+            cs_recv_thread.start()
 
         # send the username over to the client
         username = ("USERNAME" + self.username).encode("utf-8")
