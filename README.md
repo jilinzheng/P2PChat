@@ -1,5 +1,5 @@
 # Peer-to-Peer Chat System // Jilin Zheng // U49258796 
 
-## References
+## Demonstration
 
-- [Sockets with Python 3](https://www.youtube.com/playlist?list=PLQVvvaa0QuDdzLB_0JSTTcl8E8jsJLhR5)
+[![Demo Video](https://img.youtube.com/vi/UzjrAxRoDU0/0.jpg)](https://www.youtube.com/watch?v=UzjrAxRoDU0)
