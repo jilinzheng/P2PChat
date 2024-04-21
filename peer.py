@@ -3,6 +3,7 @@ Peer class, capable of both client and server functionality, enabling P2P networ
 """
 
 
+from multiprocessing import Value
 import socket
 import threading
 import sqlite3
@@ -116,22 +117,23 @@ class Peer:
             conn_username = conn_username.replace(";", "")
 
         while self.session_active:
-            msg_header = conn.recv(self.header_len)
-            if not msg_header:
-                break
-            msg_len = int(msg_header.decode("utf-8").strip())
-            msg = (conn.recv(msg_len)).decode("utf-8")
-            print(conn_username + " > " + msg, flush=True)
-            # input sanitization
-            msg = msg.replace('"', "")
-            msg = msg.replace("'", "")
-            msg = msg.replace(";", "")
-            table_entry = f"""
-                INSERT INTO recv_msgs (user, msg)
-                VALUES (\"{conn_username}\", \"{msg}\");
-                """
-            self.cursor.execute(table_entry)
-            self.db.commit()
+            try:
+                msg_header = conn.recv(self.header_len)
+                msg_len = int(msg_header.decode("utf-8").strip())
+                msg = (conn.recv(msg_len)).decode("utf-8")
+                print(conn_username + " > " + msg, flush=True)
+                # input sanitization
+                msg = msg.replace('"', "")
+                msg = msg.replace("'", "")
+                msg = msg.replace(";", "")
+                table_entry = f"""
+                    INSERT INTO recv_msgs (user, msg)
+                    VALUES (\"{conn_username}\", \"{msg}\");
+                    """
+                self.cursor.execute(table_entry)
+                self.db.commit()
+            except ValueError:
+                continue
 
     def cs_recv(self):
         while self.session_active:
@@ -142,6 +144,8 @@ class Peer:
                 print(msg)
             except OSError:
                 return
+            except ValueError:
+                return
 
     def start_session(self):
         """
@@ -151,15 +155,18 @@ class Peer:
         recv_thread = threading.Thread(target=self.recv_msg, daemon=True)
         recv_thread.start()
 
-        if self.conn_port == 50000:
-            cs_recv_thread = threading.Thread(target=self.cs_recv, daemon=True)
-            cs_recv_thread.start()
-
         # send the username over to the client
         username = ("USERNAME" + self.username).encode("utf-8")
         username_header = f"{len("USERNAME"+self.username):<{self.header_len}}".encode("utf-8")
         self.conn_socket.send(username_header+username)
-        
+         
+        if self.conn_port == 50000:
+            cs_recv_thread = threading.Thread(target=self.cs_recv, daemon=True)
+            cs_recv_thread.start()
+            serv_port = (str(self.serv_port)).encode("utf-8")
+            serv_port_header = f"{len(serv_port):<{self.header_len}}".encode("utf-8")
+            self.conn_socket.send(serv_port_header+serv_port)
+       
         while self.session_active:
             choice = input()
             if choice == "i":
@@ -170,8 +177,9 @@ class Peer:
             elif choice == ':q!': #inpsired by vim, quit the session
                 print("EXITING SESSION")
                 self.session_active = False
+                self.conn_socket.close()
 
-        recv_thread.join(timeout=5)
+        recv_thread.join(timeout=2)
         self.conn_socket.close()
         print("SUCCESSFULLY EXITED SESSION")
 

@@ -32,19 +32,26 @@ def receive_msg(client_socket, client_addr):
         return
     msg_length = int(msg_header.decode("utf-8").strip())
     msg = (client_socket.recv(msg_length)).decode("utf-8")
-    print(f"MSG RECEIVED: {msg}")
+    #print(f"MSG RECEIVED: {msg}")
 
     # handle the client's first message upon connection (entering username)
     if msg[0:8] == "USERNAME":
         username = msg[8:]
-        connected_clients[client_socket] = {'username':username, 'addr':client_addr}
         print(f"Successfully connected user '{username}' at address '{client_addr}'")
+        serv_port_header = client_socket.recv(HEADER_LENGTH)
+        if not serv_port_header:
+            return
+        serv_port_length = int(serv_port_header.decode("utf-8").strip())
+        serv_port = int((client_socket.recv(serv_port_length)).decode("utf-8"))
+        connected_clients[client_socket] = {'username':username, 'addr':("127.0.0.1", serv_port)}
 
     # return the list of clients currently registered in the central server
     elif msg[0:9] == "get_users":
         clients_list = []
-        for ii, client in enumerate(connected_clients.values()):
+        for client in connected_clients.values():
             clients_list.append({client['username'], client['addr']})
+            #print(client)
+            #print(type(client))
         clients_list = (json.dumps(clients_list, default=list)).encode("utf-8")
         clients_list_header = f"{len(clients_list):<{HEADER_LENGTH}}".encode("utf-8")
         client_socket.send(clients_list_header+clients_list)
@@ -53,9 +60,9 @@ def receive_msg(client_socket, client_addr):
     # close the client connection
     elif msg[0:10] == "close_conn":
         connected_sockets.remove(client_socket)
-        del connected_clients
+        del connected_clients[client_socket]
         client_socket.close()
-        print(f"Successfully disconnected user '{username}' at address '{client_addr}'")
+        print("DISCONNECTED USER")
 
     # otherwise just reiterate avilable central-server commands
     else:
@@ -70,7 +77,7 @@ close_conn: close the current connection to the central server"""
 
 # RUN CENTRAL SERVER INDEFINITELY
 while True:
-    print("Central server is standing by for connections...")
+    #print("Central server is standing by for connections...")
     # get all of the ready and excepted sockets, note that these are ready-to-be-READ sockets
     ready_sockets, _, excepted_sockets = select.select(connected_sockets, [], [])
 
