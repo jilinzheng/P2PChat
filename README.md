@@ -1,4 +1,4 @@
-# Peer-to-Peer Chat System // Jilin Zheng // U49258796 
+# Peer-to-Peer Chat System
 
 ## Purpose and Summary
 
